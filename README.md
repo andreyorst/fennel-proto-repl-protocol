@@ -99,7 +99,7 @@ Possible messages formatted as JSON:
 - `{"id": 0, "op": "init", "status": "fail", "data": "error message"}` - initialization of the REPL wasn't successful.
 - `{"id": ID, "op": "accept", "data": "done"}` - message was accepted by the REPL process.
 - `{"id": ID, "op": "print", "descr": "stdin", "data": "text"}` - the REPL process requested `"data"` to be printed.
-- `{"id": ID, "op": "read", "data": "named-pipe"}` - the REPL process requested user input.
+- `{"id": ID, "op": "read", "type": "pipe", "data": "path"}` - the REPL process requested user input.
   The user input is handled by attaching it to the named pipe.
 - `{"id": ID, "op": "eval", "values": ["value 1", "value 2"]}` - the REPL process returned the results of the evaluation.
   Values are stored in a list.
@@ -115,20 +115,20 @@ The protocol can be further altered by sending code to the REPL.
 Here's an example of changing the outgoing message format as Emacs plists:
 
 ```fennel
-((fn to-plist-protocol []
-   (fn protocol.format [data]
-     "Format data as emacs-lisp plist."
-     (:  "(%s)" :format
-         (table.concat
-          (icollect [_ [k v] (ipairs data)]
-            (: ":%s %s" :format k
-               (: (case v
-                    {:list data} (: "(%s)" :format (table.concat data " "))
-                    {:string data} (fennel.view data)
-                    {:sym data} (case data true :t false :nil _ (tostring data))
-                    _ (protocol.internal-error "wrong data kind" (fennel.view v)))
-                  :gsub "\n" "\\\\n"))) " ")))
-   {:id 1000 :nop ""}))
+(do
+  (fn protocol.format [data]
+    "Format data as emacs-lisp plist."
+    (:  "(%s)" :format
+        (table.concat
+         (icollect [_ [k v] (ipairs data)]
+           (: ":%s %s" :format k
+              (: (case v
+                   {:list data} (: "(%s)" :format (table.concat data " "))
+                   {:string data} (fennel.view data)
+                   {:sym data} (case data true :t false :nil _ (tostring data))
+                   _ (protocol.internal-error "wrong data kind" (fennel.view v)))
+                 :gsub "\n" "\\\\n"))) " ")))
+  {:id 1000 :nop ""})
 ```
 
 (Note that here we're modifying the protocol.format directly, so it already happens in the environment of the protocol.)
@@ -139,21 +139,65 @@ Protocol methods that are available to be changed:
   Data is a message in the following format: `[KEY {KIND DATA}]`, where KEY is an arbitrary string, KIND is one of `"sym"`, `"string"`, or `"list"`, and DATA is an arbitrary data that corresponds to the KIND.
 - `(protocol.mkfifo)` - creates a named FIFO pipe.
   Returns an absolute path to the file.
-- `(protocol.read mode callback op)` - how to read user input.
-  Must call callback with the following message:
-  ```fennel
-  [[:id {:sym protocol.id}]
-   [:op {:string OP}]
-   [:data {:string FIFO}]]
-  ```
-  The FIFO in the message is a file that then is read by the REPL,
-  and to which the client will write the data.  The OP in the
-  message is an argument for this function.
+- `(protocol.read mode callback)` - how to read user input.
 
 Additionally, `(protocol.internal-error cause message)` can be called to signal an internal error, that the client may handle in a special way.
 This method must not be changed, it is exposed only to be used in other methods.
 The `protocol.id` variable provides the ID of the currently processed request, and must not be altered.
 There's also `protocol.op` which provides the OP of the currently processed message.
 
+### Handling User input
+
+The protocol defines a custom `read` function that works in place of `io.read` and the implementation by default relies on pipes, meaning that the server and the client are on the same machine, which is usually the case for Fennel.
+The function creates a FIFO pipe via the `mkfifo` command available under POSIX systems, responds to the client with the message, containing the path to the pipe, and calls `io.read` on it, waiting for the data.
+
+The `protocol.read` method accepts the mode string, same as `io.read`, and a `message` callback, that it can use to tell the client how to pass the input.
+The message must contain the ID, OP, type of the source the REPL will read the input from, and the source itself.
+Two types are supported by the protocol:
+
+- `"pipe"` - the `"data"` key contains a path to the named pipe;
+- `"socket"` - the `"data"` is a port number of the socket connection.
+
+So an example message looks like this:
+
+```fennel
+[[:id {:sym protocol.id}]
+ [:op {:string :read}]
+ [:type {:string :pipe}]
+ [:data {:string "/path/to/the/pipe"}]]
+```
+
+This method is not portable, and will not work under Windows (unless the REPL is running in Cygwin or WSL (not tested)) but the client can redefine `protocol.mkfifo` in a system-dependent way or provide it's own implementation of `protocol.read` which doesn't rely on pipes at all.
+For example, here's an implementation of `protocol.read` compatible with the [fennel-async][3] TCP REPL using the `"socket"` type:
+
+```fennel
+(fn protocol.read [mode message]
+  (let [p (async.promise)
+        server (async.tcp.start-server
+                (fn [data]
+                  (with-open [f (io.tmpfile)]
+                    (f:write data)
+                    (f:flush)
+                    (f:seek :set)
+                    (async.deliver p (f:read mode)))
+                  nil)
+                {:host :localhost})]
+    (message [[:id {:sym protocol.id}]
+              [:op {:string :read}]
+              [:type {:string :socket}]
+              [:data {:sym (async.tcp.get-port server)}]])
+    (let [res (async.await p)]
+      (async.tcp.stop-server server)
+      res)))
+```
+
+The function starts a new server, and waits for the client to be attached.
+In the server handler the function creates a temporary file, writes the received data to it, and then calls the `read` method to read with the right format.
+(It's a workaround for not reimplementing all of the `io.read` supported reading modes, and number parsing.)
+
+After the server is started, the `message` callback is used to tell the client, that the read OP will work over a `socket` rather than over a `pipe`.
+The client will then connect to the server via the specified port, write the data to it, and the rest will be picked up by the REPL server.
+
 [1]: https://git.sr.ht/~technomancy/fennel-mode
 [2]: https://gitlab.com/alexjgriffith/min-love2d-fennel/-/blob/ecce4e3e802b3a85490341e13f8c562315f751d2/lib/stdio.fnl
+[3]: https://github.com/andreyorst/fennel-async

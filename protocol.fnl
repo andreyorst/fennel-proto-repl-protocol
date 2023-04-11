@@ -7,7 +7,7 @@
                        (when (or (not= k :_G)
                                  (not= k :___repl___))
                          (values k v)))
-        protocol* {:version "0.1.0"
+        protocol* {:version "0.2.0"
                    :id -1
                    :op nil
                    :env protocol-env}
@@ -39,10 +39,9 @@
     (fn tmpname []
       ;; Generate name for temporary file that will act as a named
       ;; FIFO pipe.
-      (let [p (io.popen "mktemp -u ${TMPDIR:-/tmp}/fennel-proto-repl.FIFO.XXXXXXXX")
-            name (p:read :l)
-            (ok? msg code) (p:close)]
-        (if ok? name (values ok? msg code))))
+      (let [name (os.tmpname)]
+        (os.remove name)
+        name))
 
     (fn protocol.mkfifo []
       ;; Create a named FIFO pipe.  Continiously tries to create a
@@ -61,11 +60,12 @@
         (set name (tmpname)))
       name)
 
-    (fn protocol.read [mode message op]
+    (fn protocol.read [mode message]
       ;; User input handling trhough FIFO.
       (case (protocol.mkfifo)
         fifo (let [_ (message [[:id {:sym protocol.id}]
-                               [:op {:string op}]
+                               [:op {:string :read}]
+                               [:type {:string :pipe}]
                                [:data {:string fifo}]])
                    data (with-open [f (io.open fifo :r)]
                           (f:read mode))]
@@ -102,7 +102,7 @@
             (fn env.io.read [mode]
               (let [input (env.io.input)]
                 (if (= input stdin)
-                    (protocol.read mode message :read)
+                    (protocol.read mode message)
                     (input:read mode))))
             (fn fd.write [fd ...]
               (if (or (= fd stdout) (= fd stderr))
