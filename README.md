@@ -7,6 +7,8 @@ The code of the protocol can be either loaded as a library or directly embedded 
 This library requires Fennel version 1.3.1+.
 Sending and receiving messages is done by wrapping the `___repl___.readChunk` and `___repl___.onValues` functions, and thus should work for custom REPLs (like the one in the [min-love2d-fennel][2]).
 
+Up until the 1.0.0 version everything is a subject to change.
+
 ## Usage overview
 
 The communication is based on structured messages - the client sends Fennel-formatted tables and receives messages in a specified format.
@@ -70,6 +72,8 @@ Incoming messages are expected to be Fennel tables:
 ```
 
 Where the `ID` is a positive integer, `OP` is a string key describing the kind of operation to apply to the `DATA` string.
+Zero, and negative integers are reserved for internal use.
+
 Each operation expects its own data format.
 Supported operations:
 
@@ -99,8 +103,9 @@ Possible messages formatted as JSON:
 - `{"id": 0, "op": "init", "status": "fail", "data": "error message"}` - initialization of the REPL wasn't successful.
 - `{"id": ID, "op": "accept", "data": "done"}` - message was accepted by the REPL process.
 - `{"id": ID, "op": "print", "descr": "stdin", "data": "text"}` - the REPL process requested `"data"` to be printed.
-- `{"id": ID, "op": "read", "type": "pipe", "data": "path"}` - the REPL process requested user input.
-  The user input is handled by attaching it to the named pipe.
+- `{"id": ID, "op": "read", "pipe": "path"}` - the REPL process requested user input.
+  By default the user input is handled by attaching it to the named pipe.
+  See [the input-handling section](#handling-user-input) for more info.
 - `{"id": ID, "op": "eval", "values": ["value 1", "value 2"]}` - the REPL process returned the results of the evaluation.
   Values are stored in a list.
   The same format goes for all OPs listed above that weren't mentioned in this list.
@@ -148,30 +153,31 @@ There's also `protocol.op` which provides the OP of the currently processed mess
 
 ### Handling User input
 
-The protocol defines a custom `read` function that works in place of `io.read` and the implementation by default relies on pipes, meaning that the server and the client are on the same machine, which is usually the case for Fennel.
-The function creates a FIFO pipe via the `mkfifo` command available under POSIX systems, responds to the client with the message, containing the path to the pipe, and calls `io.read` on it, waiting for the data.
+The protocol defines a custom `read` function that works in place of `io.read` and the default implementation relies on named pipes, meaning that the server and the client are on the same machine, which is usually the case for Fennel.
+Input handling is an open interface, meaning that any client is free to implement its own way of communication and process `read` messages in the way meaningful for the implementation.
 
 The `protocol.read` method accepts the mode string, same as `io.read`, and a `message` callback, that it can use to tell the client how to pass the input.
-The message must contain the ID, OP, type of the source the REPL will read the input from, and the source itself.
-Two types are supported by the protocol:
-
-- `"pipe"` - the `"data"` key contains a path to the named pipe;
-- `"socket"` - the `"data"` is a port number of the socket connection.
+The message must contain the ID, OP, and all the other necessary information for client to send the data back, which the client is free to interpret however it needs to.
 
 So an example message looks like this:
 
 ```fennel
 [[:id {:sym protocol.id}]
  [:op {:string :read}]
- [:type {:string :pipe}]
- [:data {:string "/path/to/the/pipe"}]]
+ [:pipe {:string "/path/to/the/pipe"}]]
 ```
 
-This method is not portable, and will not work under Windows (unless the REPL is running in Cygwin or WSL (not tested)) but the client can redefine `protocol.mkfifo` in a system-dependent way or provide it's own implementation of `protocol.read` which doesn't rely on pipes at all.
-For example, here's an implementation of `protocol.read` compatible with the [fennel-async][3] TCP REPL using the `"socket"` type:
+This method is not portable, and will not work under Windows (unless the REPL is running in Cygwin or WSL (not tested)).
+The client can redefine `protocol.mkfifo` in a system-dependent way or provide it's own implementation of `protocol.read` which doesn't rely on pipes at all.
+For example, here's an implementation of `protocol.read` compatible with the [fennel-async][3] TCP REPL which starts a small socket server which waits for data from the client, and sends a message with the `[:port {:sym port-number}]` to the client:
 
 ```fennel
 (fn protocol.read [mode message]
+  "Start a new server, and wait for a client to be attached.
+
+As a workaround for not reimplementing all of the `io.read` reading
+modes, the handler creates a temporary file, writes the received data
+to it, and then calls the `read` method on it."
   (let [p (async.promise)
         server (async.tcp.start-server
                 (fn [data]
@@ -184,19 +190,13 @@ For example, here's an implementation of `protocol.read` compatible with the [fe
                 {:host :localhost})]
     (message [[:id {:sym protocol.id}]
               [:op {:string :read}]
-              [:type {:string :socket}]
-              [:data {:sym (async.tcp.get-port server)}]])
+              [:port {:sym (async.tcp.get-port server)}]])
     (let [res (async.await p)]
       (async.tcp.stop-server server)
       res)))
 ```
 
-The function starts a new server, and waits for the client to be attached.
-In the server handler the function creates a temporary file, writes the received data to it, and then calls the `read` method to read with the right format.
-(It's a workaround for not reimplementing all of the `io.read` supported reading modes, and number parsing.)
-
-After the server is started, the `message` callback is used to tell the client, that the read OP will work over a `socket` rather than over a `pipe`.
-The client will then connect to the server via the specified port, write the data to it, and the rest will be picked up by the REPL server.
+The client may implement a read handler that, given a message with the `read` OP and the `:port` key will connect to that socket on the localhost and write the data into it.
 
 [1]: https://git.sr.ht/~technomancy/fennel-mode
 [2]: https://gitlab.com/alexjgriffith/min-love2d-fennel/-/blob/ecce4e3e802b3a85490341e13f8c562315f751d2/lib/stdio.fnl

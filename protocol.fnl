@@ -7,7 +7,7 @@
                        (when (or (not= k :_G)
                                  (not= k :___repl___))
                          (values k v)))
-        protocol* {:version "0.2.0"
+        protocol* {:version "0.3.0"
                    :id -1
                    :op nil
                    :env protocol-env}
@@ -65,8 +65,7 @@
       (case (protocol.mkfifo)
         fifo (let [_ (message [[:id {:sym protocol.id}]
                                [:op {:string :read}]
-                               [:type {:string :pipe}]
-                               [:data {:string fifo}]])
+                               [:pipe {:string fifo}]])
                    data (with-open [f (io.open fifo :r)]
                           (f:read mode))]
                (: (io.popen (: "rm -f '%s'" :format fifo)) :close)
