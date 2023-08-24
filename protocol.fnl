@@ -19,7 +19,7 @@
                              (when (or (not= k :_G)
                                        (not= k :___repl___))
                                (values k v)))
-              protocol* {:version "0.4.1"
+              protocol* {:version "0.4.2"
                          :id -1
                          :op nil
                          :env protocol-env}
@@ -81,6 +81,7 @@
                          _ (message [[:id {:sym protocol.id}]
                                      [:op {:string :read}]
                                      [:pipe {:string fifo}]
+                                     [:formats {:list (fcollect [i 1 formats.n] (view (. formats i)))}]])
                          data (with-open [f (io.open fifo :r)]
                                 (pack (f:read (unpack formats 1 formats.n))))]
                      (: (io.popen (: "rm -f '%s'" :format fifo)) :close)
