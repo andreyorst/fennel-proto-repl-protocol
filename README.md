@@ -7,7 +7,7 @@ The code of the protocol can be either loaded as a library or directly embedded 
 This library requires Fennel version 1.3.1+.
 Sending and receiving messages is done by wrapping the `___repl___.readChunk` and `___repl___.onValues` functions, and thus should work for custom REPLs (like the one in the [min-love2d-fennel][2]).
 
-Up until the 1.0.0 version everything is a subject to breaking changes.
+Up until the 1.0.0 version everything is subject to breaking changes.
 
 ## Usage overview
 
@@ -36,8 +36,8 @@ By loading the `protocol.fnl` file in the REPL and immediately calling the resul
 {"id": 0, "op": "init", "status": "done", "protocol": "0.1.0", "fennel": "1.3.1-dev", "lua": "PUC Lua 5.4"}
 ```
 
-If the initialization was successful, the protocol will respond with a message of ID `0` with the OP `"init"` and a  `"done"` status, followed by protocol and environment versions.
-After that the editor can send and receive messages:
+If the initialization is successful, the protocol will respond with a message of ID `0` with the OP `"init"` and a  `"done"` status, followed by protocol and environment versions.
+After that, the editor can send and receive messages:
 
 ```fennel
 >> {:id 1 :eval "(+ 1 2 3)"}
@@ -61,7 +61,7 @@ The protocol then wraps all REPL's IO in such a way that the message format is a
 {"id": 3, "op": "done"}
 ```
 
-Additionally, if the Fennel module located elsewhere and it's impossible to require it with `(require :fennel)` call, the second parameter to the procol function can be used to specify the location:
+Additionally, if the Fennel module is located elsewhere and it's impossible to require it with the `(require :fennel)` call, the second parameter to the protocol function can be used to specify the location:
 
 ```fennel
 >> ((require :protocol) format-json :lib.fennel)
@@ -115,7 +115,7 @@ Possible messages formatted as JSON:
 - `{"id": ID, "op": "accept", "data": "done"}` - message was accepted by the REPL process.
 - `{"id": ID, "op": "print", "descr": "stdin", "data": "text"}` - the REPL process requested `"data"` to be printed.
 - `{"id": ID, "op": "read", "pipe": "path"}` - the REPL process requested user input.
-  By default the user input is handled by attaching it to the named pipe.
+  By default, the user input is handled by attaching it to the named pipe.
   See [the input-handling section](#handling-user-input) for more info.
 - `{"id": ID, "op": "eval", "values": ["value 1", "value 2"]}` - the REPL process returned the results of the evaluation.
   Values are stored in a list.
@@ -129,7 +129,7 @@ A client decides what to do with each incoming message or not to process one at 
 
 All messages must be complete - no partial expressions are supported.
 The protocol will discard any unfinished expression and return a `parse` error.
-This is done because the REPL process must never be blocked to wait for more input while processing a message, since more messages can come from different sources.
+This is done because the REPL process must never be blocked to wait for more input while processing a message since more messages can come from different sources.
 
 For example, if the user were to send an unfinished expression, it would be stored in the REPL `readChunk` method.
 While not technically a problem, as the user can just finish their expression in the next message, the client has to keep track of the ID, and it also can try to send a different request, and this would mix up two messages in the `readChunk` buffer.
@@ -144,13 +144,13 @@ Here's an example of changing the outgoing message format to Emacs property list
 (do (fn protocol.format [data] "Format data as emacs-lisp plist." (:  "(%s)" :format (table.concat (icollect [_ [k v] (ipairs data)] (: ":%s %s" :format k (: (case v {:list data} (: "(%s)" :format (table.concat data " ")) {:string data} (fennel.view data) {:sym data} (case data true :t false :nil _ (tostring data)) _ (protocol.internal-error "wrong data kind" (fennel.view v))) :gsub "\n" "\\\\n"))) " "))) {:id 1000 :nop ""})
 ```
 
-Few things to note:
+A few things to note:
 
 1. Contrary to the format function we're supplying during the upgrade, here we're modifying the `protocol.format` itself, so it has a different argument list.
-2. The code above is formatted as a single line, because the protocol operates on a single line messages.
+2. The code above is formatted as a single line because the protocol operates on single-line messages.
    Code minification is performed by the client.
    The client should remove all newlines, escape newlines in strings, and remove all of the comments from the code being sent to the process.
-3. Finally, the code is wrapped in a `(do ... {id 1 :nop ""})` structure to inject the code and evaluate it in the protocol environment instead of the urer environment, and still conform to the message specification.
+3. Finally, the code is wrapped in a `(do ... {id 1 :nop ""})` structure to inject the code and evaluate it in the protocol environment instead of the user environment, and still conform to the message specification.
    This is a general mechanism for modifying the protocol at runtime.
 
 Protocol methods that are available to be changed:
@@ -170,11 +170,11 @@ There's also `protocol.op` which provides the OP of the currently processed mess
 ## Handling the user input
 
 The protocol defines a custom `read` function that works in place of `io.read` and the default implementation relies on named pipes, meaning that the server and the client are on the same machine, which is usually the case for Fennel.
-Input handling is an open interface, meaning that any client is free to implement its own way of communication and process `read` messages in the way meaningful for the implementation.
+Input handling is an open interface, meaning that any client is free to implement its own way of communication and process `read` messages in a way meaningful for the implementation.
 
 The `protocol.read` method accepts a `message` callback followed by the modes same as for `io.read`.
 The `message` callback is used to tell the client how and where to pass the input.
-The message itself must contain the ID, OP, and all the other necessary information for client to send the data back, which the client is free to interpret however it needs to.
+The message itself must contain the ID, OP, and all the other necessary information for a client to send the data back, which the client is free to interpret however it needs to.
 
 An example message can look like this:
 
@@ -185,9 +185,9 @@ An example message can look like this:
 ```
 
 This method is not portable, and will not work under Windows because the named pipes can't be created in the same way (unless the REPL is running in Cygwin or WSL (not tested)).
-The client can redefine `protocol.mkfifo` in a system-dependent way or provide it's own implementation of `protocol.read` which doesn't rely on pipes at all.
+The client can redefine `protocol.mkfifo` in a system-dependent way or provide its own implementation of `protocol.read` which doesn't rely on pipes at all.
 
-For example, here's an implementation of `protocol.read` which uses [luasocket][3] to starts a small socket server and wait for data from the client.
+For example, here's an implementation of `protocol.read` which uses [luasocket][3] to start a small socket server and wait for data from the client.
 Instead of providing a `"pipe"` parameter in the message, it provides the port number:
 
 ```fennel
