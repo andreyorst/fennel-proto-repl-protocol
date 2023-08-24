@@ -7,7 +7,7 @@
                        (when (or (not= k :_G)
                                  (not= k :___repl___))
                          (values k v)))
-        protocol* {:version "0.3.0"
+        protocol* {:version "0.4.0"
                    :id -1
                    :op nil
                    :env protocol-env}
@@ -60,16 +60,20 @@
         (set name (tmpname)))
       name)
 
-    (fn protocol.read [mode message]
-      ;; User input handling trhough FIFO.
+    (fn protocol.read [formats message]
+    (fn protocol.read [message ...]
+      ;; User input handling through FIFO (named pipe).
       (case (protocol.mkfifo)
-        fifo (let [_ (message [[:id {:sym protocol.id}]
+        fifo (let [unpack (or unpack table.unpack)
+                   pack (fn [...] (doto [...] (tset :n (select :# ...))))
+                   formats (pack ...)
+                   _ (message [[:id {:sym protocol.id}]
                                [:op {:string :read}]
                                [:pipe {:string fifo}]])
                    data (with-open [f (io.open fifo :r)]
-                          (f:read mode))]
+                          (pack (f:read (unpack formats 1 formats.n))))]
                (: (io.popen (: "rm -f '%s'" :format fifo)) :close)
-               data)
+               (unpack data 1 data.n))
         nil (protocol.internal-error "unable to create FIFO pipe.")))
 
     ;; Protocol initialization
@@ -98,11 +102,11 @@
               nil)
             (fn env.io.write [...]
               (: (env.io.output) :write ...))
-            (fn env.io.read [mode]
+            (fn env.io.read [...]
               (let [input (env.io.input)]
                 (if (= input stdin)
-                    (protocol.read mode message)
-                    (input:read mode))))
+                    (protocol.read message ...)
+                    (input:read ...))))
             (fn fd.write [fd ...]
               (if (or (= fd stdout) (= fd stderr))
                   (message [[:id {:sym protocol.id}]
