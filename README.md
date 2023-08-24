@@ -23,7 +23,7 @@ For example, here's a format function for JSON-based communication:
         (: "%s: %s" :format (env.fennel.view k)
            (: (case v
                 {:list data} (.. "[" (table.concat data ", ") "]")
-                {:string data} (env.fennel.view data)
+                {:string data} (env.fennel.view data {:byte-escape #(: "\\\\x%2x" :format $)})
                 {:sym data} (tostring data)
                 _ (env.protocol.internal-error "Wrong data kind" (env.fennel.view v)))
               :gsub "\n" "\\\\n"))) ", ")))

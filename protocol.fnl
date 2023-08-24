@@ -60,11 +60,10 @@
         (set name (tmpname)))
       name)
 
-    (fn protocol.read [formats message]
     (fn protocol.read [message ...]
       ;; User input handling through FIFO (named pipe).
       (case (protocol.mkfifo)
-        fifo (let [unpack (or unpack table.unpack)
+        fifo (let [unpack (or _G.unpack table.unpack)
                    pack (fn [...] (doto [...] (tset :n (select :# ...))))
                    formats (pack ...)
                    _ (message [[:id {:sym protocol.id}]
