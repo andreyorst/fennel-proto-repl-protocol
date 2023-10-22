@@ -19,7 +19,7 @@
                              (when (or (not= k :_G)
                                        (not= k :___repl___))
                                (values k v)))
-              protocol* {:version "0.4.2"
+              protocol* {:version "0.5.0"
                          :id -1
                          :op nil
                          :env protocol-env}
@@ -237,6 +237,7 @@
                           {: id :reload module} (accept id :reload (.. ",reload " module))
                           {: id :find val} (accept id :find (.. ",find " val))
                           {: id :compile expr} (accept id :compile (.. ",compile " expr))
+                          {: id :return expr} (accept id :return (.. ",return " expr))
                           {: id :apropos re} (accept id :apropos (.. ",apropos " re))
                           {: id :apropos-doc re} (accept id :apropos-doc (.. ",apropos-doc " re))
                           {: id :apropos-show-docs re} (accept id :apropos-show-docs (.. ",apropos-show-docs " re))
