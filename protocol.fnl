@@ -13,6 +13,8 @@
                 (format-function {:fennel {:view #(string.format "%q" $)}} data))}))
         (let [{: view : eval : traceback : parser
                : version &as fennel} fennel
+              {:fennel fennel-ver
+               :lua lua-ver} (fennel.runtime-version true)
               {:concat t/concat} table
               InternalError {}
               protocol-env (collect [k v (pairs _G)]
@@ -92,8 +94,7 @@
           (case _G.___repl___
             {:onValues on-values :readChunk read-chunk
              :env env :onError on-error :pp pp &as ___repl___}
-            (let [{:fennel fennel-ver :lua lua-ver} (fennel.runtime-version true)
-                  {:write io/write :read io/read
+            (let [{:write io/write :read io/read
                    : stdin : stdout : stderr} env.io
                   {:write fd/write :read fd/read &as fd}
                   (. (getmetatable env.io.stdin) :__index)
@@ -280,8 +281,17 @@
             ;; Bail out if the REPL doesn't expose the ___repl___ table or its
             ;; contents differ.  Fennelview is used to communicate back the
             ;; response in the protocol-based message format.
-            (-> [[:id {:sym 0}]
-                 [:op {:string "init"}]
-                 [:status {:string "fail"}]
-                 [:data {:string (.. "unsupported Fennel version: " version)}]]
-                (setmetatable {:__fennelview #(protocol.format $)})))))))
+            (let [fennel-ver (if (not= :string (type fennel-ver)) "" fennel-ver)
+                  message
+                  (case (fennel-ver:match "(%d+)%.(%d+)%.(%d+)")
+                    (major minor)
+                    (let [major (tonumber major)
+                          minor (tonumber minor)]
+                      (if (and (>= major 1) (>= minor 3))
+                          "the ___repl___ isn't properly set or available, check if the protocol initialization is applied to a proper Fennel REPL"
+                          (.. "unsupported Fennel version: " fennel-ver)))
+                    _ (.. "unknown Fennel version: " (view fennel-ver)))]
+              (-> [[:id {:sym 0}]
+                   [:op {:string "init"}]
+                   [:status {:string "fail"}]
+                   [:data {:string message}]])))))))
