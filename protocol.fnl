@@ -56,7 +56,7 @@
               name))
 
           (fn protocol.mkfifo []
-            ;; Create a named FIFO pipe.  Continiously tries to create a
+            ;; Create a named FIFO pipe.  Continuously tries to create a
             ;; temporary name via `protocol.tmpname` and create a FIFO pipe with it.
             ;;
             ;; TODO: This is not portable, though a client can override this
@@ -107,7 +107,7 @@
 
               (fn set-io [env message]
                 ;; Set up IO interceptors for current environment.  Message is
-                ;; a callback that is used to send messsages to the REPL.
+                ;; a callback that is used to send messages to the REPL.
                 (when upgraded?
                   (fn env.print [...]
                     (env.io.write (.. (join "\t" ...) "\n"))
@@ -135,7 +135,7 @@
               (fn reset-io [env]
                 ;; Resets IO to original handlers.
                 (set env.print lua-print)
-                (set env.io.wirte io/write)
+                (set env.io.write io/write)
                 (set env.io.read io/read)
                 (set fd.read fd/read)
                 (set fd.write fd/write))
@@ -158,7 +158,7 @@
 
               (fn count-expressions [data]
                 ;; Counts amount of expressions in the given string.  If the
-                ;; string fails to parse, returns 1 as exprssion count,
+                ;; string fails to parse, returns 1 as expression count,
                 ;; because the expression will break down the line.
                 (let [(ok? n)
                       (pcall #(accumulate [i 0 _ _ (parser data)] (+ i 1)))]
