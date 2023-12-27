@@ -253,7 +253,7 @@
                     (data protocol.id xs)))
                 (fn ___repl___.onError [type* msg source]
                   (case (values type* msg)
-                    (_ {:type InternalError : cause :data ?msg})
+                    (where (_ {:type (= InternalError) : cause :data ?msg}))
                     (err -1 :proto-repl (if ?msg (.. cause ": " (remove-locus ?msg)) cause))
                     "Lua Compile"
                     (err protocol.id :lua
