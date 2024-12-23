@@ -19,7 +19,7 @@
                              (when (or (not= k :_G)
                                        (not= k :___repl___))
                                (values k v)))
-              protocol* {:version "0.5.0"
+              protocol* {:version "0.6.0"
                          :id -1
                          :op nil
                          :env protocol-env}
@@ -48,45 +48,7 @@
 
           (set protocol.format #(format-function protocol*.env $))
 
-          (fn tmpname []
-            ;; Generate name for temporary file that will act as a named
-            ;; FIFO pipe.
-            (let [name (os.tmpname)]
-              (os.remove name)
-              name))
-
-          (fn protocol.mkfifo []
-            ;; Create a named FIFO pipe.  Continuously tries to create a
-            ;; temporary name via `protocol.tmpname` and create a FIFO pipe with it.
-            ;;
-            ;; TODO: This is not portable, though a client can override this
-            ;; if needed.
-            (fn open-fifo [name]
-              (: (io.popen (: "mkfifo '%s' 2>/dev/null" :format name)) :close))
-            (var (i name) (values 0 (tmpname)))
-            (while (and name (not (open-fifo name)))
-              (when (> i 10)
-                (protocol.internal-error
-                 "too many retries" "can't open FIFO"))
-              (set i (+ i 1))
-              (set name (tmpname)))
-            name)
-
-          (fn protocol.read [message ...]
-            ;; User input handling through FIFO (named pipe).
-            (case (protocol.mkfifo)
-              fifo (let [unpack (or _G.unpack table.unpack)
-                         pack (fn [...] (doto [...] (tset :n (select :# ...))))
-                         formats (pack ...)
-                         _ (message [[:id {:sym protocol.id}]
-                                     [:op {:string :read}]
-                                     [:pipe {:string fifo}]
-                                     [:formats {:list (fcollect [i 1 formats.n] (view (. formats i)))}]])
-                         data (with-open [f (io.open fifo :r)]
-                                (pack (f:read (unpack formats 1 formats.n))))]
-                     (: (io.popen (: "rm -f '%s'" :format fifo)) :close)
-                     (unpack data 1 data.n))
-              nil (protocol.internal-error "unable to create FIFO pipe.")))
+          ;; protocol.message and protocol.receive are defined later
 
           ;; Protocol initialization
           (case _G.___repl___
@@ -98,6 +60,29 @@
                   {:write fd/write :read fd/read &as fd}
                   (. (getmetatable env.io.stdin) :__index)
                   lua-print print]
+
+              (fn protocol.receive [id]
+                ;; Read one message from the protocol environment. If
+                ;; the received message doesn't correspond to the
+                ;; current protocol.id, send a retry OP so the client
+                ;; retries the message later.
+                (var response (eval (io/read :l) {:env {}}))
+                (while (not= response.id id)
+                  (protocol.message [[:id {:sym id}]
+                                     [:op {:string :retry}]
+                                     [:message {:string (fennel.view response {:one-line? true})}]])
+                  (set response (eval (io/read :l) {:env {}})))
+                response)
+
+              (fn protocol.read [...]
+                (let [unpack (or _G.unpack table.unpack)
+                      pack (fn [...] (doto [...] (tset :n (select :# ...))))
+                      formats (pack ...)
+                      _ (protocol.message [[:id {:sym protocol.id}]
+                                           [:op {:string :read}]
+                                           [:formats {:list (fcollect [i 1 formats.n] (view (. formats i)))}]])]
+                  (. (protocol.receive protocol.id) :data)))
+
               (fn join [sep ...]
                 ;; Concatenate multiple values into a string using `sep` as a
                 ;; separator.
@@ -105,9 +90,8 @@
                  (fcollect [i 1 (select :# ...)]
                    (tostring (select i ...))) sep))
 
-              (fn set-io [env message]
-                ;; Set up IO interceptors for current environment.  Message is
-                ;; a callback that is used to send messages to the REPL.
+              (fn set-io [env]
+                ;; Set up IO interceptors for current environment.
                 (when upgraded?
                   (fn env.print [...]
                     (env.io.write (.. (join "\t" ...) "\n"))
@@ -117,14 +101,14 @@
                   (fn env.io.read [...]
                     (let [input (env.io.input)]
                       (if (= input stdin)
-                          (protocol.read message ...)
+                          (protocol.read ...)
                           (input:read ...))))
                   (fn fd.write [fd ...]
                     (if (or (= fd stdout) (= fd stderr))
-                        (message [[:id {:sym protocol.id}]
-                                  [:op {:string :print}]
-                                  [:descr {:string (if (= fd stdout) :stdout :stderr)}]
-                                  [:data {:string (join "" ...)}]])
+                        (protocol.message [[:id {:sym protocol.id}]
+                                           [:op {:string :print}]
+                                           [:descr {:string (if (= fd stdout) :stdout :stderr)}]
+                                           [:data {:string (join "" ...)}]])
                         (fd/write fd ...))
                     fd)
                   (fn fd.read [fd ...]
@@ -135,17 +119,17 @@
               (fn reset-io [env]
                 ;; Resets IO to original handlers.
                 (set env.print lua-print)
-                (set env.io.write io/write)
+                (set env.io.wirte io/write)
                 (set env.io.read io/read)
                 (set fd.read fd/read)
                 (set fd.write fd/write))
 
-              (fn message [data]
-                ;; General purpose way of sending messages to the REPL.
+              (fn protocol.message [data]
+                ;; General purpose way of sending messages to the editor.
                 (reset-io env)
                 (on-values [(protocol.format data)])
                 (io.flush)
-                (set-io env message))
+                (set-io env))
 
               (fn done [id]
                 ;; Sends the message that processing the `id` is complete and
@@ -153,12 +137,12 @@
                 (when (> id 0)
                   (set protocol*.id -1)
                   (set protocol*.op nil)
-                  (message [[:id {:sym id}]
-                            [:op {:string :done}]])))
+                  (protocol.message [[:id {:sym id}]
+                                     [:op {:string :done}]])))
 
               (fn count-expressions [data]
                 ;; Counts amount of expressions in the given string.  If the
-                ;; string fails to parse, returns 1 as expression count,
+                ;; string fails to parse, returns 1 as exprssion count,
                 ;; because the expression will break down the line.
                 (let [(ok? n)
                       (pcall #(accumulate [i 0 _ _ (parser data)] (+ i 1)))]
@@ -171,8 +155,8 @@
                   (protocol.internal-error "message ID must be a positive number" (view id)))
                 (when (< id 1)
                   (protocol.internal-error "message ID must be greater than 0" id))
-                (message [[:id {:sym id}]
-                          [:op {:string :accept}]])
+                (protocol.message [[:id {:sym id}]
+                                   [:op {:string :accept}]])
                 (set protocol*.id id)
                 (set protocol*.op op)
                 (set expr-count 1)
@@ -187,20 +171,20 @@
                 ;; Sends the data back to the process and completes the
                 ;; communication.
                 (when (not= protocol.op :nop)
-                  (message [[:id {:sym id}]
-                            [:op {:string protocol.op}]
-                            [:values {:list (icollect [_ v (ipairs data)] (view v))}]]))
+                  (protocol.message [[:id {:sym id}]
+                                     [:op {:string protocol.op}]
+                                     [:values {:list (icollect [_ v (ipairs data)] (view v))}]]))
                 (done id))
 
               (fn err [id ?kind mesg ?trace]
                 ;; Sends back the error information and completes the
                 ;; communication.
-                (message [[:id {:sym id}]
-                          [:op {:string :error}]
-                          [:type {:string (if ?kind ?kind :runtime)}]
-                          [:data {:string mesg}]
-                          (when ?trace
-                            [:traceback {:string ?trace}])])
+                (protocol.message [[:id {:sym id}]
+                                   [:op {:string :error}]
+                                   [:type {:string (if ?kind ?kind :runtime)}]
+                                   [:data {:string mesg}]
+                                   (when ?trace
+                                     [:traceback {:string ?trace}])])
                 (done id))
 
               (fn remove-locus [msg]
@@ -219,16 +203,20 @@
                   (tset :onError on-error)
                   (tset :pp pp)))
 
+              (fn protocol.env-set! [k v]
+                ;; set key `k` to value `v` in the user environment
+                (tset env k v))
+
               (fn upgrade []
                 ;; Upgrade the REPL to use the protocol-based communication.
                 (set upgraded? true)
-                (set-io env message)
+                (set-io env)
                 (fn ___repl___.readChunk [{: stack-size &as parser-state}]
                   (if (> stack-size 0)
                       (error "incomplete message")
                       (let [msg (let [_ (reset-io env)
                                       mesg (read-chunk parser-state)
-                                      _ (set-io env message)]
+                                      _ (set-io env)]
                                   mesg)]
                         (case (and msg (eval msg {:env protocol.env}))
                           {: id :eval code} (accept id :eval code)
@@ -253,7 +241,7 @@
                     (data protocol.id xs)))
                 (fn ___repl___.onError [type* msg source]
                   (case (values type* msg)
-                    (where (_ {:type (= InternalError) : cause :data ?msg}))
+                    (_ {:type InternalError : cause :data ?msg})
                     (err -1 :proto-repl (if ?msg (.. cause ": " (remove-locus ?msg)) cause))
                     "Lua Compile"
                     (err protocol.id :lua
@@ -268,12 +256,12 @@
                     _ (err protocol.id (string.lower type*)
                            (remove-locus msg))))
                 (fn ___repl___.pp [x] (view x))
-                (message [[:id {:sym 0}]
-                          [:op {:string "init"}]
-                          [:status {:string "done"}]
-                          [:protocol {:string protocol*.version}]
-                          [:fennel {:string (or fennel-ver "unknown")}]
-                          [:lua {:string (or lua-ver "unknown")}]]))
+                (protocol.message [[:id {:sym 0}]
+                                   [:op {:string "init"}]
+                                   [:status {:string "done"}]
+                                   [:protocol {:string protocol*.version}]
+                                   [:fennel {:string (or fennel-ver "unknown")}]
+                                   [:lua {:string (or lua-ver "unknown")}]]))
 
               (upgrade))
             _
