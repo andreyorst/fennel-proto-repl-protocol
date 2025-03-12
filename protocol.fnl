@@ -19,7 +19,7 @@
                              (when (or (not= k :_G)
                                        (not= k :___repl___))
                                (values k v)))
-              protocol* {:version "0.6.0"
+              protocol* {:version "0.6.1"
                          :id -1
                          :op nil
                          :env protocol-env}
@@ -75,8 +75,7 @@
                 response)
 
               (fn protocol.read [...]
-                (let [unpack (or _G.unpack table.unpack)
-                      pack (fn [...] (doto [...] (tset :n (select :# ...))))
+                (let [pack (fn [...] (doto [...] (tset :n (select :# ...))))
                       formats (pack ...)
                       _ (protocol.message [[:id {:sym protocol.id}]
                                            [:op {:string :read}]
@@ -136,7 +135,6 @@
                 ;; resets the `protocol.id`.
                 (when (> id 0)
                   (set protocol*.id -1)
-                  (set protocol*.op nil)
                   (protocol.message [[:id {:sym id}]
                                      [:op {:string :done}]])))
 
@@ -170,6 +168,8 @@
               (fn data [id data]
                 ;; Sends the data back to the process and completes the
                 ;; communication.
+                (when (not= :string (type protocol.op))
+                  (protocol.internal-error "protocol OP is not a string" (view protocol.op)))
                 (when (not= protocol.op :nop)
                   (protocol.message [[:id {:sym id}]
                                      [:op {:string protocol.op}]
@@ -240,7 +240,7 @@
                   (when (= 0 expr-count)
                     (data protocol.id xs)))
                 (fn ___repl___.onError [type* msg source]
-                  (case (values type* msg)
+                  (match (values type* msg)
                     (_ {:type InternalError : cause :data ?msg})
                     (err -1 :proto-repl (if ?msg (.. cause ": " (remove-locus ?msg)) cause))
                     "Lua Compile"
